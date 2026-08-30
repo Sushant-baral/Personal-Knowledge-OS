@@ -4,7 +4,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.core.logging_config import configure_logging
 from app.database.connection import init_db
+
+configure_logging()
 
 # Default Vite dev server origins. Add your deployed frontend origin here
 # later (or read it from an env var) — this list is intentionally not

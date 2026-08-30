@@ -1,48 +1,66 @@
 """
-The agent: a deterministic orchestration layer, not an autonomous
-framework. For every message it:
+The agent orchestrator.
 
-  1. Always attempts RAG retrieval against the user's documents, but only
-     keeps results above a minimum similarity score — so an irrelevant
-     question doesn't drag in noise.
-  2. Only pulls in long-term memory when the question *looks* personal
-     (keyword-based check — see _looks_personal below).
-  3. Builds one prompt combining whatever context it found (possibly
-     none) and sends it to the LLM.
-  4. Saves the conversation, and separately checks whether the user's
-     message itself is worth remembering going forward.
+    User message
+          |
+          v
+    Load short-term history (last few turns of this conversation)
+          |
+          v
+    Planner: decide_action() -> which tool is needed
+          |
+          v
+    Tool execution (search_knowledge / get_document / none)
+          |
+          v
+    Build a system prompt grounded in whatever the tool returned
+          |
+          v
+    Groq (via app.llm.provider.generate_chat), given
+    [system prompt, ...short-term history, current user message]
+          |
+          v
+    Save assistant reply, return {answer, sources, conversation_id}
 
-This keeps the decision process simple, deterministic, and easy to
-follow end-to-end.
+Design notes:
+- Tool selection is deterministic (see app/agent/planner.py) — no second
+  LLM call is spent on routing, which keeps this fast, free, and easy to
+  explain/demo.
+- RAG is never a second implementation: SEARCH_KNOWLEDGE and
+  STUDY_ASSISTANT both call the *existing* app.rag.retrieval.retrieve()
+  through app/agent/tools.py.
+- Short-term memory = the last few messages of this conversation, fetched
+  from the existing Message table and passed to the LLM as real chat
+  history. This is what makes "explain it with an example" resolve "it"
+  correctly.
+- Long-term memory (user preferences, learning progress, saved concepts)
+  is intentionally NOT built out here. The existing lightweight Memory
+  table + app/memory/extraction.py keyword-based capture is left in place
+  as-is and used only for GENERAL_CHAT context, precisely so it remains a
+  clean extension point: swapping in a smarter long-term memory system
+  later only means changing memory/extraction.py + memory/store.py, not
+  this file.
+- Tool failures never crash the request: a failed tool logs the error and
+  the agent continues with empty context rather than 500ing.
 """
 
-import re
-from typing import Optional
+import logging
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.database.models import Conversation, Message
+from app.agent import prompts, tools
+from app.agent.planner import decide_action
+from app.database.models import Conversation, Document, Message
 from app.database.seed import get_or_create_default_user
-from app.llm.provider import generate_answer
+from app.llm.provider import generate_chat
 from app.memory.extraction import maybe_extract_memory
 from app.memory.store import retrieve_memories, store_memory
-from app.rag.retrieval import retrieve
 
-RAG_SCORE_THRESHOLD = 0.05
-RAG_TOP_K = 3
-MEMORY_LIMIT = 5
+logger = logging.getLogger("app.agent.orchestrator")
 
-_PERSONAL_PATTERN = re.compile(
-    r"\bwhat (?:was|am|have) i\b"
-    r"|\bwhat do you know about me\b"
-    r"|\bremind me\b"
-    r"|\b(?:i|my)\b.*\b(?:studying|working on|prefer|recently|preference)\b",
-    re.I,
-)
-
-
-def _looks_personal(message: str) -> bool:
-    return bool(_PERSONAL_PATTERN.search(message))
+SHORT_TERM_HISTORY_TURNS = 8  # messages (not conversational turns), i.e. ~4 back-and-forths
+STUDY_ASSISTANT_TOP_K = 6
 
 
 def _get_or_create_conversation(db: Session, user_id: int, conversation_id: Optional[int]) -> Conversation:
@@ -58,29 +76,30 @@ def _get_or_create_conversation(db: Session, user_id: int, conversation_id: Opti
     return conversation
 
 
-def _build_prompt(message: str, rag_results: list, memories: list) -> str:
-    context_blocks = []
+def _load_short_term_history(db: Session, conversation_id: int, limit: int) -> List[dict]:
+    """Fetch the last `limit` messages of this conversation, oldest first,
+    in the {role, content} shape the LLM provider expects. Called BEFORE
+    the current user message is saved, so it never duplicates it."""
+    recent = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    recent.reverse()
+    return [{"role": m.role, "content": m.content} for m in recent]
 
-    if rag_results:
-        knowledge_lines = "\n".join(
-            f"- ({r['document']}): {r['relevant_text']}" for r in rag_results
-        )
-        context_blocks.append(f"Relevant knowledge from the user's documents:\n{knowledge_lines}")
 
-    if memories:
-        memory_lines = "\n".join(f"- {m.content}" for m in memories)
-        context_blocks.append(f"What you know about the user:\n{memory_lines}")
-
-    if not context_blocks:
-        return f"User question: {message}"
-
-    context = "\n\n".join(context_blocks)
-    return (
-        "You are the assistant inside a Personal Knowledge OS. Answer the "
-        "user's question directly and concisely. Ground your answer in the "
-        "context below when it's relevant; otherwise answer from general "
-        "knowledge.\n\n"
-        f"{context}\n\nUser question: {message}"
+def _looks_personal(message: str) -> bool:
+    """Very small heuristic, kept from the original single-path agent:
+    decides whether it's worth pulling in long-term Memory rows for
+    general conversation. Not used by the retrieval-grounded tools, since
+    those are already grounded in the user's documents."""
+    lowered = message.lower()
+    return any(
+        phrase in lowered
+        for phrase in ("what do you know about me", "remind me", "what was i", "what have i")
     )
 
 
@@ -88,33 +107,91 @@ def handle_chat(db: Session, message: str, conversation_id: Optional[int] = None
     user = get_or_create_default_user(db)
     conversation = _get_or_create_conversation(db, user_id=user.id, conversation_id=conversation_id)
 
+    # Short-term memory: grab conversation history BEFORE saving the new
+    # user message, so it isn't duplicated in the history list.
+    history = _load_short_term_history(db, conversation.id, SHORT_TERM_HISTORY_TURNS)
+
     db.add(Message(conversation_id=conversation.id, role="user", content=message))
     db.commit()
 
-    # Decide whether this message itself is worth remembering. Done before
-    # calling the LLM so memory storage still works even when no LLM
-    # provider is configured yet.
-    memory_candidate = maybe_extract_memory(message)
-    if memory_candidate:
-        store_memory(
-            db,
-            user_id=user.id,
-            content=memory_candidate["content"],
-            memory_type=memory_candidate["memory_type"],
+    # --- Long-term memory extension point -------------------------------
+    # Deliberately simple (see app/memory/extraction.py docstring). This
+    # is where a smarter long-term memory system would slot in later
+    # without touching anything else in this function.
+    try:
+        memory_candidate = maybe_extract_memory(message)
+        if memory_candidate:
+            store_memory(
+                db,
+                user_id=user.id,
+                content=memory_candidate["content"],
+                memory_type=memory_candidate["memory_type"],
+            )
+    except Exception:
+        logger.exception("Long-term memory extraction failed; continuing without it.")
+    # ---------------------------------------------------------------------
+
+    known_titles = _known_document_titles(db)
+
+    decision = decide_action(message, known_document_titles=known_titles)
+    logger.info(
+        "decision tool=%s reason=%r study_mode=%s document_hint=%r",
+        decision.tool,
+        decision.reason,
+        decision.study_mode,
+        decision.document_hint,
+    )
+
+    rag_results: List[dict] = []
+    system_prompt: str
+
+    if decision.tool == "GENERAL_CHAT":
+        system_prompt = prompts.general_chat_system_prompt()
+        if _looks_personal(message):
+            memories = retrieve_memories(db, user_id=user.id, limit=5)
+            if memories:
+                memory_lines = "\n".join(f"- {m.content}" for m in memories)
+                system_prompt += f"\n\nThings you've previously noted about this user:\n{memory_lines}"
+
+    elif decision.tool == "SEARCH_KNOWLEDGE":
+        result = tools.search_knowledge(message)
+        rag_results = result["data"] if result["ok"] else []
+        if not result["ok"]:
+            logger.warning("SEARCH_KNOWLEDGE tool failed: %s", result.get("error"))
+        system_prompt = prompts.search_knowledge_system_prompt(prompts.format_context(rag_results))
+
+    elif decision.tool == "STUDY_ASSISTANT":
+        result = tools.search_knowledge(message, top_k=STUDY_ASSISTANT_TOP_K)
+        rag_results = result["data"] if result["ok"] else []
+        if not result["ok"]:
+            logger.warning("STUDY_ASSISTANT retrieval failed: %s", result.get("error"))
+        system_prompt = prompts.study_assistant_system_prompt(
+            decision.study_mode or "explain", prompts.format_context(rag_results)
         )
 
-    # 1. RAG — always attempted, only kept if actually relevant.
-    rag_results = retrieve(message, top_k=RAG_TOP_K)
-    rag_results = [r for r in rag_results if r["score"] >= RAG_SCORE_THRESHOLD]
+    elif decision.tool == "GET_DOCUMENT":
+        result = tools.get_document(db, decision.document_hint)
+        if result["ok"]:
+            system_prompt = prompts.get_document_system_prompt(result["data"])
+        else:
+            logger.warning("GET_DOCUMENT tool failed: %s", result.get("error"))
+            system_prompt = (
+                f"{prompts.BASE_IDENTITY} The user asked about their uploaded documents, "
+                "but looking that up failed internally. Apologize briefly and suggest "
+                "they try again."
+            )
 
-    # 2. Memory — only pulled in for questions that look personal.
-    memories = retrieve_memories(db, user_id=user.id, limit=MEMORY_LIMIT) if _looks_personal(message) else []
+    else:  # pragma: no cover - defensive, planner only returns known tools
+        logger.error("Unknown tool from planner: %s", decision.tool)
+        system_prompt = prompts.general_chat_system_prompt()
 
-    # 3. Ask the LLM (raises LLMNotConfiguredError / LLMProviderError,
-    #    which the route turns into a clean HTTP error). The user message
-    #    and any extracted memory are already saved by this point.
-    prompt = _build_prompt(message, rag_results, memories)
-    answer = generate_answer(prompt)
+    llm_messages = [{"role": "system", "content": system_prompt}, *history, {"role": "user", "content": message}]
+
+    # Raises LLMNotConfiguredError / LLMProviderError, which the route
+    # turns into a clean HTTP error. The user message and any extracted
+    # memory are already saved by this point.
+    answer = generate_chat(llm_messages)
+    logger.info("response generated tool=%s answer_length=%d", decision.tool, len(answer))
 
     db.add(Message(conversation_id=conversation.id, role="assistant", content=answer))
     db.commit()
@@ -124,4 +201,14 @@ def handle_chat(db: Session, message: str, conversation_id: Optional[int] = None
         for r in rag_results
     ]
 
-    return {"answer": answer, "sources": sources, "conversation_id": conversation.id}
+    return {
+        "answer": answer,
+        "sources": sources,
+        "conversation_id": conversation.id,
+        "tool_used": decision.tool,
+    }
+
+
+def _known_document_titles(db: Session) -> List[str]:
+    rows = db.query(Document.title, Document.filename).all()
+    return [title or filename for title, filename in rows]

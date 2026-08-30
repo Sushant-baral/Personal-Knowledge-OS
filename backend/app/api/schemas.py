@@ -57,3 +57,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[ChatSource]
     conversation_id: int
+    # Which agent tool handled this message (e.g. "SEARCH_KNOWLEDGE",
+    # "STUDY_ASSISTANT"). Purely informational — the frontend doesn't need
+    # to know about it, but it's handy for the dev console / a demo.
+    tool_used: Optional[str] = None
