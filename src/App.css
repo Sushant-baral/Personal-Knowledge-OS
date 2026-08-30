@@ -1,0 +1,464 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: #0a0a0b;
+}
+
+.pkos {
+  --bg: #0a0a0b;
+  --bg-panel: #121214;
+  --bg-elevated: #17171a;
+  --bg-hover: #1c1c1f;
+  --border: #2a2a2e;
+  --border-soft: #1c1c1f;
+  --text: #ece7dd;
+  --text-dim: #8f8b83;
+  --text-faint: #56534d;
+  --accent: #c1975f;
+  --accent-soft: #c1975f66;
+  --accent-glow: #c1975f22;
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  overflow: hidden;
+}
+
+.pkos::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 50;
+  mix-blend-mode: overlay;
+}
+
+.pkos-mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+.pkos-display {
+  font-family: var(--font-display);
+}
+
+.pkos-scrim {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.pkos-scrim::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.pkos-scrim::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.pkos-fade-in {
+  animation: pkosFadeIn 0.5s ease both;
+}
+@keyframes pkosFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pkos-pulse {
+  animation: pkosPulse 3.2s ease-in-out infinite;
+}
+@keyframes pkosPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    r: 3.2;
+  }
+  50% {
+    opacity: 1;
+    r: 4.4;
+  }
+}
+
+.pkos-draw {
+  stroke-dasharray: 400;
+  stroke-dashoffset: 400;
+  animation: pkosDraw 1.6s ease forwards;
+}
+@keyframes pkosDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.pkos-cursor {
+  animation: pkosBlink 1.1s steps(1) infinite;
+}
+@keyframes pkosBlink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Layout shell */
+
+.pkos-shell {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.pkos-sidebar {
+  width: 190px;
+  border-right: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 26px 14px;
+  flex-shrink: 0;
+}
+
+.pkos-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  margin-bottom: 30px;
+}
+
+.pkos-logo-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+
+.pkos-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pkos-status {
+  font-size: 9.5px;
+  color: var(--text-faint);
+  padding: 0 12px;
+  line-height: 1.8;
+}
+
+.pkos-main {
+  flex: 1;
+  position: relative;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.pkos-view {
+  padding: 40px 44px;
+}
+
+.pkos-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  overflow-y: auto;
+}
+
+.pkos-hero-title {
+  font-size: 44px;
+  margin: 10px 0 6px;
+  letter-spacing: -0.01em;
+}
+
+.pkos-doc-grid {
+  margin-top: 26px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.pkos-study-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  margin-top: 28px;
+}
+
+.pkos-chat-log {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding-right: 8px;
+  max-height: 320px;
+}
+
+.pkos-side-panel {
+  border-left: 1px solid var(--border-soft);
+  padding-left: 22px;
+  min-width: 210px;
+}
+
+/* Nav items */
+
+.pkos-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 3px;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease;
+  border-left: 2px solid transparent;
+}
+.pkos-nav-item:hover {
+  color: var(--text-dim);
+  background: var(--bg-hover);
+}
+.pkos-nav-item.active {
+  color: var(--text);
+  background: var(--bg-elevated);
+  border-left: 2px solid var(--accent);
+}
+
+/* Cards, chips, inputs, buttons */
+
+.pkos-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+.pkos-card:hover {
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+
+.pkos-chip {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.pkos-chip.active {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.pkos-chip:hover:not(.active) {
+  border-color: var(--accent-soft);
+  color: var(--text);
+}
+
+.pkos-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color 0.2s ease;
+  min-width: 0;
+}
+.pkos-input:focus {
+  border-color: var(--accent);
+}
+.pkos-input::placeholder {
+  color: var(--text-faint);
+}
+
+.pkos-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 9px 16px;
+  background: var(--accent);
+  color: #0a0a0b;
+  border: none;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+.pkos-btn:hover {
+  filter: brightness(1.12);
+}
+.pkos-btn:active {
+  transform: scale(0.98);
+}
+
+.pkos-btn-ghost {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.pkos-btn-ghost:hover {
+  border-color: var(--accent-soft);
+  color: var(--text);
+}
+
+.pkos-node {
+  cursor: pointer;
+  transition: r 0.2s ease;
+}
+.pkos-node-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  fill: var(--text-dim);
+  pointer-events: none;
+}
+
+/* Upload modal */
+
+.pkos-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 11, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.pkos-modal {
+  width: 100%;
+  max-width: 420px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  padding: 32px;
+  position: relative;
+}
+
+.pkos-dropzone {
+  margin-top: 16px;
+  border: 1px dashed var(--border);
+  padding: 34px 20px;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                          */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 860px) {
+  .pkos-view {
+    padding: 28px 22px;
+  }
+
+  .pkos-hero-title {
+    font-size: 34px;
+  }
+
+  .pkos-side-panel {
+    border-left: none;
+    border-top: 1px solid var(--border-soft);
+    padding-left: 0;
+    padding-top: 18px;
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  .pkos-shell {
+    flex-direction: column;
+  }
+
+  .pkos-sidebar {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    border-right: none;
+    border-bottom: 1px solid var(--border-soft);
+    padding: 12px 16px;
+    overflow-x: auto;
+  }
+
+  .pkos-sidebar > div:first-child {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .pkos-logo {
+    margin-bottom: 0;
+  }
+
+  .pkos-nav-list {
+    flex-direction: row;
+    gap: 2px;
+  }
+
+  .pkos-nav-item {
+    padding: 8px 9px;
+    border-left: none;
+    border-bottom: 2px solid transparent;
+  }
+  .pkos-nav-item.active {
+    border-left: none;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  .pkos-nav-label {
+    display: none;
+  }
+
+  .pkos-status {
+    display: none;
+  }
+
+  .pkos-main {
+    overflow-y: visible;
+  }
+}
+
+@media (max-width: 480px) {
+  .pkos-view {
+    padding: 22px 16px;
+  }
+
+  .pkos-hero-title {
+    font-size: 28px;
+  }
+
+  .pkos-modal {
+    padding: 22px;
+  }
+}
