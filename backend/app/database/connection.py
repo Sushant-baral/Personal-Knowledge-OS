@@ -54,3 +54,38 @@ def init_db() -> None:
     from app.database import models  # noqa: F401  (registers models on Base)
 
     Base.metadata.create_all(bind=engine)
+    _migrate_documents_table()
+
+
+def _migrate_documents_table() -> None:
+    """
+    create_all() only creates tables that don't exist yet — it never alters
+    an existing table. This project has no migration tool (Alembic, etc.),
+    so if you're upgrading from a pkos.db created before the status/
+    file_path/size_bytes/error_message columns existed, patch them in here
+    instead of losing already-uploaded documents. Only handles SQLite (the
+    default); other databases should use a real migration tool.
+    """
+    if not DATABASE_URL.startswith("sqlite"):
+        return
+
+    with engine.connect() as conn:
+        existing_columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(documents)")}
+
+        # Rows that already exist were indexed under the old (pre-status)
+        # synchronous logic, which never left a row behind unless indexing
+        # had already succeeded — so "indexed" is the correct backfill value.
+        statements = []
+        if "status" not in existing_columns:
+            statements.append("ALTER TABLE documents ADD COLUMN status VARCHAR NOT NULL DEFAULT 'indexed'")
+        if "file_path" not in existing_columns:
+            statements.append("ALTER TABLE documents ADD COLUMN file_path VARCHAR")
+        if "size_bytes" not in existing_columns:
+            statements.append("ALTER TABLE documents ADD COLUMN size_bytes INTEGER")
+        if "error_message" not in existing_columns:
+            statements.append("ALTER TABLE documents ADD COLUMN error_message TEXT")
+
+        for statement in statements:
+            conn.exec_driver_sql(statement)
+        if statements:
+            conn.commit()

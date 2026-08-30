@@ -38,6 +38,9 @@ def generate_answer(prompt: str) -> str:
     if provider == "openai":
         return _generate_openai(prompt, api_key=api_key, model=model or "gpt-4o-mini")
 
+    if provider == "groq":
+        return _generate_groq(prompt, api_key=api_key, model=model or "qwen/qwen3.8-27b")
+
     raise LLMProviderError(f"Unsupported LLM_PROVIDER '{provider}'.")
 
 
@@ -56,6 +59,26 @@ def _generate_openai(prompt: str, api_key: str, model: str) -> str:
         )
     except Exception as exc:
         # Never leak the API key or other env values in the error message.
+        raise LLMProviderError(f"LLM request failed: {exc}") from exc
+
+    return response.choices[0].message.content or ""
+
+def _generate_groq(prompt: str, api_key: str, model: str) -> str:
+    # Groq exposes an OpenAI-compatible API, so we reuse the same client
+    # with a different base_url — no new dependency needed.
+    try:
+        from openai import OpenAI
+    except ImportError as exc:  # pragma: no cover
+        raise LLMProviderError("The 'openai' package is not installed.") from exc
+
+    client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as exc:
         raise LLMProviderError(f"LLM request failed: {exc}") from exc
 
     return response.choices[0].message.content or ""

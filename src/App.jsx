@@ -17,7 +17,7 @@ import {
   Check,
 } from "lucide-react";
 import "./App.css";
-import { getHealth, sendChatMessage, uploadDocument } from "./lib/api";
+import { getHealth, sendChatMessage, uploadDocument, listDocuments, deleteDocument } from "./lib/api";
 
 /* ------------------------------------------------------------------ */
 /* Mock data                                                           */
@@ -44,6 +44,38 @@ const DOCUMENTS = [
   { id: 7, title: "Consensus & Paxos", type: "PDF", pages: 27, topics: ["Distributed Systems"], uploaded: "Jul 22", lastAccessed: "2 weeks ago", concepts: 16 },
   { id: 8, title: "Linear Algebra for ML", type: "PDF", pages: 44, topics: ["Mathematics", "AI & ML"], uploaded: "Jun 30", lastAccessed: "3 weeks ago", concepts: 25 },
 ];
+
+function formatShortDate(iso) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * DocumentCard/DocumentDetail were built around the mock DOCUMENTS shape
+ * above (pages, concepts, topics, etc.) which the real backend doesn't
+ * track. This adapts a real DocumentOut into that same shape with honest
+ * fallbacks, so real documents render in the existing UI without pretending
+ * to have data we don't actually have.
+ */
+function apiDocToCardDoc(apiDoc) {
+  return {
+    id: `api-${apiDoc.id}`,
+    apiId: apiDoc.id,
+    title: apiDoc.title || apiDoc.filename,
+    type: (apiDoc.file_type || "file").toUpperCase(),
+    pages: null,
+    topics: ["Uploaded"],
+    uploaded: formatShortDate(apiDoc.created_at),
+    lastAccessed: formatShortDate(apiDoc.updated_at),
+    concepts: null,
+    status: apiDoc.status,
+    isReal: true,
+  };
+}
 
 const NODES = [
   { id: "ai", label: "AI", x: 70, y: 60, group: "ml" },
@@ -309,14 +341,25 @@ function HomeView({ selected, setSelected }) {
   );
 }
 
-function DocumentCard({ doc, onOpen }) {
+function DocumentCard({ doc, onOpen, onDelete }) {
   return (
-    <div className="pkos-card" style={{ padding: "16px 18px", cursor: "pointer" }} onClick={() => onOpen(doc)}>
+    <div className="pkos-card" style={{ padding: "16px 18px", cursor: "pointer", position: "relative" }} onClick={() => onOpen(doc)}>
+      {doc.isReal && onDelete && (
+        <X
+          size={13}
+          color="var(--text-faint)"
+          style={{ position: "absolute", top: 10, right: 10, cursor: "pointer" }}
+          onClick={(e) => {
+            e.stopPropagation(); // don't also open the detail view
+            onDelete(doc);
+          }}
+        />
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div className="pkos-mono" style={{ fontSize: 10, color: "var(--accent)", border: "1px solid var(--accent-soft)", padding: "2px 6px" }}>
           {doc.type}
         </div>
-        <span className="pkos-mono" style={{ fontSize: 10, color: "var(--text-faint)" }}>{doc.concepts} CONCEPTS</span>
+        <span className="pkos-mono" style={{ fontSize: 10, color: "var(--text-faint)" }}>{doc.concepts ?? "—"} CONCEPTS</span>
       </div>
       <div className="pkos-display" style={{ fontSize: 17, marginTop: 12 }}>{doc.title}</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
@@ -326,7 +369,7 @@ function DocumentCard({ doc, onOpen }) {
       </div>
       <Divider />
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 11.5, color: "var(--text-faint)" }}>
-        <span>{doc.pages} pages</span>
+        <span>{doc.pages != null ? `${doc.pages} pages` : (doc.isReal ? "Indexed doc" : "—")}</span>
         <span>Opened {doc.lastAccessed}</span>
       </div>
     </div>
@@ -338,7 +381,7 @@ function DocumentDetail({ doc, onClose }) {
     <div className="pkos-fade-in pkos-view pkos-overlay">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <Eyebrow>{doc.type} · {doc.pages} pages · uploaded {doc.uploaded}</Eyebrow>
+          <Eyebrow>{doc.type} · {doc.pages != null ? `${doc.pages} pages` : "indexed"} · uploaded {doc.uploaded}</Eyebrow>
           <h2 className="pkos-display" style={{ fontSize: 30, marginTop: 8 }}>{doc.title}</h2>
         </div>
         <div className="pkos-btn-ghost" onClick={onClose} style={{ cursor: "pointer" }}>CLOSE</div>
@@ -348,9 +391,13 @@ function DocumentDetail({ doc, onClose }) {
         <div style={{ flex: "1 1 420px", minWidth: 280 }}>
           <Eyebrow>AI summary</Eyebrow>
           <p style={{ fontSize: 14.5, lineHeight: 1.7, color: "var(--text-dim)", marginTop: 10, maxWidth: 620 }}>
-            This document covers the core mechanics of {doc.topics[0].toLowerCase()}, walking through foundational
-            definitions before building toward applied examples. {doc.concepts} distinct concepts were extracted and
-            linked into your knowledge graph.
+            {doc.isReal ? (
+              <>This document has been chunked and embedded into your vector store, so it's searchable from Chat right now.</>
+            ) : (
+              <>This document covers the core mechanics of {doc.topics[0].toLowerCase()}, walking through foundational
+              definitions before building toward applied examples. {doc.concepts} distinct concepts were extracted and
+              linked into your knowledge graph.</>
+            )}
           </p>
 
           <div style={{ marginTop: 26 }}>
@@ -387,7 +434,7 @@ function DocumentDetail({ doc, onClose }) {
   );
 }
 
-function UploadPanel({ onClose }) {
+function UploadPanel({ onClose, onUploaded }) {
   // The middle steps are cosmetic (the real backend does this as one
   // request) but we hold on the last "real" step until the response
   // actually comes back, so the UI never lies about being done.
@@ -421,13 +468,16 @@ function UploadPanel({ onClose }) {
 
     try {
       // Real round trip: React -> POST /api/documents (multipart) ->
-      // FastAPI extracts text + ingests into the vector store -> the
-      // saved DocumentOut -> React.
+      // FastAPI stores the file, extracts text, chunks it, embeds it, and
+      // writes vectors -> the saved DocumentOut (with status) -> React.
+      // A resolved promise here means the backend already set
+      // status="indexed" — it only returns 201 after that succeeds.
       const doc = await uploadDocument(file);
       clearInterval(advance);
       setUploadedDoc(doc);
       setStep(STEPS.length - 1);
       setDone(true);
+      if (doc.status === "indexed" && onUploaded) onUploaded();
     } catch (err) {
       clearInterval(advance);
       setError(err.message || "Upload failed.");
@@ -498,12 +548,42 @@ function KnowledgeView() {
   const [q, setQ] = useState("");
   const [openDoc, setOpenDoc] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [realDocs, setRealDocs] = useState([]);
+  const [loadError, setLoadError] = useState(null);
+  const [loadingDocs, setLoadingDocs] = useState(true);
 
-  const filtered = DOCUMENTS.filter((d) => {
+  const refreshDocuments = () => {
+    setLoadingDocs(true);
+    setLoadError(null);
+    listDocuments()
+      .then((docs) => setRealDocs(docs.map(apiDocToCardDoc)))
+      .catch((err) => setLoadError(err.message || "Could not load documents from the backend."))
+      .finally(() => setLoadingDocs(false));
+  };
+
+  useEffect(() => {
+    refreshDocuments();
+  }, []);
+
+  // Real, persisted documents show up alongside the existing demo library
+  // rather than replacing it, so refreshing/restarting never loses an
+  // upload, but the demo content you already had stays visible too.
+  const allDocuments = [...realDocs, ...DOCUMENTS];
+
+  const filtered = allDocuments.filter((d) => {
     const matchesTopic = filter === "All" || d.topics.includes(filter);
     const matchesQ = d.title.toLowerCase().includes(q.toLowerCase());
     return matchesTopic && matchesQ;
   });
+
+  const handleDelete = (doc) => {
+    if (!window.confirm(`Delete "${doc.title}"? This removes it from your library, the vector store, and disk.`)) {
+      return;
+    }
+    deleteDocument(doc.apiId)
+      .then(() => refreshDocuments())
+      .catch((err) => setLoadError(err.message || "Could not delete this document."));
+  };
 
   return (
     <div className="pkos-fade-in pkos-view" style={{ position: "relative", minHeight: "100%" }}>
@@ -526,17 +606,33 @@ function KnowledgeView() {
         ))}
       </div>
 
+      {loadError && (
+        <div className="pkos-mono" style={{ fontSize: 11, color: "#d97a6c", marginTop: 14 }}>
+          {loadError} — showing demo library only.
+        </div>
+      )}
+      {loadingDocs && (
+        <div className="pkos-mono" style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 14 }}>
+          Loading your library…
+        </div>
+      )}
+
       <div className="pkos-scrim pkos-doc-grid">
         {filtered.map((d) => (
-          <DocumentCard key={d.id} doc={d} onOpen={setOpenDoc} />
+          <DocumentCard key={d.id} doc={d} onOpen={setOpenDoc} onDelete={handleDelete} />
         ))}
-        {filtered.length === 0 && (
+        {filtered.length === 0 && !loadingDocs && (
           <div style={{ color: "var(--text-faint)", fontSize: 13 }}>Nothing matches — try another topic or term.</div>
         )}
       </div>
 
       {openDoc && <DocumentDetail doc={openDoc} onClose={() => setOpenDoc(null)} />}
-      {uploading && <UploadPanel onClose={() => setUploading(false)} />}
+      {uploading && (
+        <UploadPanel
+          onClose={() => setUploading(false)}
+          onUploaded={refreshDocuments}
+        />
+      )}
     </div>
   );
 }

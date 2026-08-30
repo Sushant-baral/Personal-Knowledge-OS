@@ -12,6 +12,9 @@ class DocumentOut(BaseModel):
     title: Optional[str] = None
     file_type: str
     content: str
+    status: str
+    size_bytes: Optional[int] = None
+    error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
