@@ -17,6 +17,7 @@ import {
   Check,
 } from "lucide-react";
 import "./App.css";
+import { getHealth, sendChatMessage, uploadDocument } from "./lib/api";
 
 /* ------------------------------------------------------------------ */
 /* Mock data                                                           */
@@ -387,33 +388,69 @@ function DocumentDetail({ doc, onClose }) {
 }
 
 function UploadPanel({ onClose }) {
+  // The middle steps are cosmetic (the real backend does this as one
+  // request) but we hold on the last "real" step until the response
+  // actually comes back, so the UI never lies about being done.
   const STEPS = ["UPLOADING", "READING", "UNDERSTANDING", "INDEXING", "CONNECTED"];
   const [step, setStep] = useState(-1);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState(null);
+  const [uploadedDoc, setUploadedDoc] = useState(null);
+  const fileInputRef = useRef(null);
 
   const start = () => {
-    setStep(0);
-    setDone(false);
+    if (step >= 0 && !done && !error) return; // upload in progress
+    fileInputRef.current?.click();
   };
 
-  useEffect(() => {
-    if (step < 0 || step >= STEPS.length - 1) {
-      if (step === STEPS.length - 1) setDone(true);
-      return;
+  const handleFileChange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // allow choosing the same file again later
+    if (!file) return;
+
+    setError(null);
+    setDone(false);
+    setUploadedDoc(null);
+    setStep(0);
+
+    // Advance through the cosmetic steps while the real request is in
+    // flight; the last step only lights up once the backend responds.
+    const advance = setInterval(() => {
+      setStep((s) => (s < STEPS.length - 2 ? s + 1 : s));
+    }, 500);
+
+    try {
+      // Real round trip: React -> POST /api/documents (multipart) ->
+      // FastAPI extracts text + ingests into the vector store -> the
+      // saved DocumentOut -> React.
+      const doc = await uploadDocument(file);
+      clearInterval(advance);
+      setUploadedDoc(doc);
+      setStep(STEPS.length - 1);
+      setDone(true);
+    } catch (err) {
+      clearInterval(advance);
+      setError(err.message || "Upload failed.");
+      setStep(-1);
     }
-    const t = setTimeout(() => setStep((s) => s + 1), 650);
-    return () => clearTimeout(t);
-  }, [step]);
+  };
 
   return (
     <div className="pkos-fade-in pkos-modal-backdrop">
       <div className="pkos-modal">
         <X size={14} color="var(--text-faint)" style={{ position: "absolute", top: 16, right: 16, cursor: "pointer" }} onClick={onClose} />
         <Eyebrow>Add to your knowledge</Eyebrow>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.txt,.md,.markdown"
+          style={{ display: "none" }}
+          onChange={handleFileChange}
+        />
         <div onClick={start} className="pkos-dropzone">
           <Upload size={20} color="var(--accent)" style={{ margin: "0 auto" }} />
           <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 12 }}>
-            Drop a PDF, TXT, or Markdown file — or click to simulate
+            Drop a PDF, TXT, or Markdown file — or click to choose one
           </div>
         </div>
 
@@ -434,13 +471,20 @@ function UploadPanel({ onClose }) {
           </div>
         )}
 
-        {done && (
+        {error && (
+          <div className="pkos-mono" style={{ fontSize: 11, color: "#d97a6c", marginTop: 20 }}>
+            {error}
+          </div>
+        )}
+
+        {done && uploadedDoc && (
           <div className="pkos-fade-in" style={{ marginTop: 20 }}>
-            <Eyebrow>Extracted topics</Eyebrow>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-              {["Consensus", "Leader Election", "Failure Detection"].map((t) => (
-                <div key={t} className="pkos-chip">{t}</div>
-              ))}
+            <Eyebrow>Indexed</Eyebrow>
+            <div style={{ fontSize: 13.5, color: "var(--text)", marginTop: 8 }}>
+              {uploadedDoc.title || uploadedDoc.filename}
+            </div>
+            <div className="pkos-mono" style={{ fontSize: 10.5, color: "var(--text-faint)", marginTop: 4 }}>
+              {(uploadedDoc.file_type || "").toUpperCase()} · added to your library
             </div>
           </div>
         )}
@@ -564,24 +608,44 @@ function ChatView() {
   const [messages, setMessages] = useState(CHAT_SEED);
   const [input, setInput] = useState("");
   const [activeSource, setActiveSource] = useState(null);
+  const [conversationId, setConversationId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const endRef = useRef(null);
 
   useEffect(() => {
     if (endRef.current) {
       endRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages]);
+  }, [messages, loading]);
 
-  const send = () => {
-    if (!input.trim()) return;
-    const userMsg = { role: "user", text: input };
-    const reply = {
-      role: "assistant",
-      text: "Based on what's indexed so far, here's a grounded answer drawn from your notes rather than general knowledge.",
-      sources: [{ doc: "Operating Systems Notes", page: 3 }],
-    };
-    setMessages((m) => [...m, userMsg, reply]);
+  const send = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+
+    setMessages((m) => [...m, { role: "user", text }]);
     setInput("");
+    setError(null);
+    setLoading(true);
+
+    try {
+      // Real round trip: React -> POST /api/chat -> FastAPI (RAG + memory +
+      // LLM orchestration) -> response -> React.
+      const result = await sendChatMessage(text, conversationId);
+      setConversationId(result.conversation_id);
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          text: result.answer,
+          sources: (result.sources || []).map((s) => ({ doc: s.document, page: s.page })),
+        },
+      ]);
+    } catch (err) {
+      setError(err.message || "Something went wrong talking to the backend.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -599,7 +663,7 @@ function ChatView() {
               <div style={{ fontSize: 14, lineHeight: 1.65, color: m.role === "user" ? "var(--text)" : "var(--text-dim)" }}>
                 {m.text}
               </div>
-              {m.sources && (
+              {m.sources && m.sources.length > 0 && (
                 <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 10 }}>
                   <div className="pkos-mono" style={{ fontSize: 9.5, color: "var(--text-faint)", marginBottom: 8 }}>SOURCES</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -611,8 +675,19 @@ function ChatView() {
               )}
             </div>
           ))}
+          {loading && (
+            <div className="pkos-mono" style={{ fontSize: 11, color: "var(--text-faint)" }}>
+              <span className="pkos-cursor">›</span> thinking…
+            </div>
+          )}
           <div ref={endRef} />
         </div>
+
+        {error && (
+          <div className="pkos-mono" style={{ fontSize: 11, color: "#d97a6c", marginTop: 10 }}>
+            {error}
+          </div>
+        )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 18, borderTop: "1px solid var(--border-soft)", paddingTop: 14 }}>
           <span className="pkos-mono" style={{ color: "var(--accent)" }}>›</span>
@@ -623,8 +698,14 @@ function ChatView() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
+            disabled={loading}
           />
-          <Send size={15} color="var(--accent)" style={{ cursor: "pointer" }} onClick={send} />
+          <Send
+            size={15}
+            color="var(--accent)"
+            style={{ cursor: loading ? "default" : "pointer", opacity: loading ? 0.5 : 1 }}
+            onClick={send}
+          />
         </div>
       </div>
 
@@ -727,7 +808,41 @@ function SettingsView() {
 /* Shell                                                                */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Pings the real backend's GET /api/health on mount and periodically
+ * after that, so the sidebar's status line reflects whether FastAPI is
+ * actually reachable instead of always claiming "online".
+ */
+function useBackendStatus() {
+  const [status, setStatus] = useState("checking"); // "checking" | "online" | "offline"
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const check = () => {
+      getHealth()
+        .then(() => !cancelled && setStatus("online"))
+        .catch(() => !cancelled && setStatus("offline"));
+    };
+
+    check();
+    const interval = setInterval(check, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  return status;
+}
+
 function Sidebar({ active, setActive }) {
+  const backendStatus = useBackendStatus();
+  const statusLabel =
+    backendStatus === "online" ? "SYSTEM ONLINE" : backendStatus === "offline" ? "BACKEND OFFLINE" : "CONNECTING…";
+  const statusColor =
+    backendStatus === "online" ? "var(--accent)" : backendStatus === "offline" ? "#d97a6c" : "var(--text-faint)";
+
   return (
     <div className="pkos-sidebar">
       <div>
@@ -751,7 +866,7 @@ function Sidebar({ active, setActive }) {
       <div className="pkos-mono pkos-status">
         <div>NODES: {STATS.memories}</div>
         <div>LINKED: 98.2%</div>
-        <div style={{ color: "var(--accent)" }}>● SYSTEM ONLINE</div>
+        <div style={{ color: statusColor }}>● {statusLabel}</div>
       </div>
     </div>
   );
