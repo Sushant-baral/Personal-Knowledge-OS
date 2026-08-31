@@ -208,6 +208,63 @@ body,
   margin-top: 28px;
 }
 
+/* Study: quiz option row + flashcard flip affordance. Reuses the same
+   card/border/accent language as the rest of the app rather than
+   introducing new colors. */
+
+.pkos-quiz-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13.5px;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.pkos-quiz-option:hover:not(.answered) {
+  border-color: var(--accent-soft);
+  color: var(--text);
+}
+.pkos-quiz-option.selected {
+  border-color: var(--accent-soft);
+  background: var(--bg-elevated);
+}
+.pkos-quiz-option.correct {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-glow);
+}
+.pkos-quiz-option.incorrect {
+  border-color: #d97a6c;
+  color: var(--text);
+  background: #d97a6c1a;
+}
+.pkos-quiz-option-letter {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+  min-width: 14px;
+}
+
+.pkos-flashcard {
+  border: 1px solid var(--border-soft);
+  background: var(--bg-panel);
+  padding: 40px 32px;
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.pkos-flashcard:hover {
+  border-color: var(--accent-soft);
+}
+
 .pkos-chat-log {
   flex: 1;
   overflow-y: auto;

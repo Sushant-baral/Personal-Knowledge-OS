@@ -59,7 +59,8 @@ from app.memory.store import retrieve_memories, store_memory
 
 logger = logging.getLogger("app.agent.orchestrator")
 
-SHORT_TERM_HISTORY_TURNS = 8  # messages (not conversational turns), i.e. ~4 back-and-forths
+SHORT_TERM_HISTORY_TURNS = 8  
+
 STUDY_ASSISTANT_TOP_K = 6
 
 
@@ -107,17 +108,11 @@ def handle_chat(db: Session, message: str, conversation_id: Optional[int] = None
     user = get_or_create_default_user(db)
     conversation = _get_or_create_conversation(db, user_id=user.id, conversation_id=conversation_id)
 
-    # Short-term memory: grab conversation history BEFORE saving the new
-    # user message, so it isn't duplicated in the history list.
     history = _load_short_term_history(db, conversation.id, SHORT_TERM_HISTORY_TURNS)
 
     db.add(Message(conversation_id=conversation.id, role="user", content=message))
     db.commit()
 
-    # --- Long-term memory extension point -------------------------------
-    # Deliberately simple (see app/memory/extraction.py docstring). This
-    # is where a smarter long-term memory system would slot in later
-    # without touching anything else in this function.
     try:
         memory_candidate = maybe_extract_memory(message)
         if memory_candidate:
@@ -129,7 +124,6 @@ def handle_chat(db: Session, message: str, conversation_id: Optional[int] = None
             )
     except Exception:
         logger.exception("Long-term memory extraction failed; continuing without it.")
-    # ---------------------------------------------------------------------
 
     known_titles = _known_document_titles(db)
 
@@ -181,15 +175,13 @@ def handle_chat(db: Session, message: str, conversation_id: Optional[int] = None
                 "they try again."
             )
 
-    else:  # pragma: no cover - defensive, planner only returns known tools
+    else:  
+
         logger.error("Unknown tool from planner: %s", decision.tool)
         system_prompt = prompts.general_chat_system_prompt()
 
     llm_messages = [{"role": "system", "content": system_prompt}, *history, {"role": "user", "content": message}]
 
-    # Raises LLMNotConfiguredError / LLMProviderError, which the route
-    # turns into a clean HTTP error. The user message and any extracted
-    # memory are already saved by this point.
     answer = generate_chat(llm_messages)
     logger.info("response generated tool=%s answer_length=%d", decision.tool, len(answer))
 

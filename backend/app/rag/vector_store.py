@@ -54,7 +54,6 @@ def add_chunks(document_id: int, document_title: str, chunks: list, embeddings: 
             "document_id": document_id,
             "document_title": document_title,
             "chunk_index": c["index"],
-            # Chroma metadata can't store None, so use -1 as "no page".
             "page": c["page"] if c["page"] is not None else -1,
         }
         for c in chunks

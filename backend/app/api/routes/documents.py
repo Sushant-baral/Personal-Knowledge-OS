@@ -18,10 +18,6 @@ router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".markdown"}
 
-# Where original uploaded files are permanently kept on local disk.
-# Configurable via DOCUMENT_STORAGE_DIR in backend/.env; defaults to
-# backend/storage/uploads (this file lives at backend/app/api/routes/,
-# so parents[3] is the backend/ directory).
 STORAGE_DIR = Path(
     os.getenv("DOCUMENT_STORAGE_DIR") or (Path(__file__).resolve().parents[3] / "storage" / "uploads")
 )
@@ -53,10 +49,6 @@ async def upload_document(file: UploadFile = File(...), db: Session = Depends(ge
     if not text.strip():
         raise HTTPException(status_code=422, detail="No extractable text was found in this file.")
 
-    # Persist the original file to local disk BEFORE creating the DB row,
-    # so we never end up with a database record pointing at a file that
-    # was never actually written. Name it with a uuid (not the DB id,
-    # which doesn't exist yet) to guarantee no collisions.
     stored_path = STORAGE_DIR / f"{uuid.uuid4().hex}{ext}"
     try:
         stored_path.write_bytes(raw_bytes)
@@ -81,13 +73,8 @@ async def upload_document(file: UploadFile = File(...), db: Session = Depends(ge
     db.refresh(document)
 
     try:
-        # Chunking -> embedding -> vector store, using the existing RAG
-        # pipeline untouched (app/rag/ingest.py).
         ingest_document(document_id=document.id, title=title, text=text, pages=pages)
     except Exception as exc:
-        # Keep the row and the stored file (so the failure is visible and
-        # inspectable) but make sure it's clearly marked as failed rather
-        # than silently looking indexed.
         document.status = "failed"
         document.error_message = str(exc)
         db.commit()
@@ -130,8 +117,6 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
         try:
             os.remove(file_path)
         except OSError:
-            # File already gone or inaccessible — DB row and vectors are
-            # already cleaned up, so don't fail the request over this.
             pass
 
     return None

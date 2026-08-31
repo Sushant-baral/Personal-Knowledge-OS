@@ -24,8 +24,6 @@ from app.rag.retrieval import retrieve
 
 logger = logging.getLogger("app.agent.tools")
 
-# Chunks scoring below this are considered noise, not a real match.
-# Same threshold the previous single-path orchestrator used.
 RAG_SCORE_THRESHOLD = 0.05
 DEFAULT_TOP_K = 4
 

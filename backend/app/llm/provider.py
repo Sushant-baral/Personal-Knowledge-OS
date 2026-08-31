@@ -19,7 +19,8 @@ from typing import List, TypedDict
 
 
 class ChatMessage(TypedDict):
-    role: str  # "system" | "user" | "assistant"
+    role: str  
+
     content: str
 
 
@@ -66,7 +67,8 @@ def generate_chat(messages: List[ChatMessage]) -> str:
 def _generate_openai(messages: List[ChatMessage], api_key: str, model: str) -> str:
     try:
         from openai import OpenAI
-    except ImportError as exc:  # pragma: no cover - dependency always listed, defensive only
+    except ImportError as exc:  
+
         raise LLMProviderError("The 'openai' package is not installed.") from exc
 
     client = OpenAI(api_key=api_key)
@@ -77,18 +79,16 @@ def _generate_openai(messages: List[ChatMessage], api_key: str, model: str) -> s
             messages=messages,
         )
     except Exception as exc:
-        # Never leak the API key or other env values in the error message.
         raise LLMProviderError(f"LLM request failed: {exc}") from exc
 
     return response.choices[0].message.content or ""
 
 
 def _generate_groq(messages: List[ChatMessage], api_key: str, model: str) -> str:
-    # Groq exposes an OpenAI-compatible API, so we reuse the same client
-    # with a different base_url — no new dependency needed.
     try:
         from openai import OpenAI
-    except ImportError as exc:  # pragma: no cover
+    except ImportError as exc:  
+
         raise LLMProviderError("The 'openai' package is not installed.") from exc
 
     client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")

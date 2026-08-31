@@ -26,6 +26,5 @@ def configure_logging() -> None:
         datefmt="%H:%M:%S",
     )
 
-    # Quiet down noisy third-party loggers so agent logs stand out.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("chromadb").setLevel(logging.WARNING)

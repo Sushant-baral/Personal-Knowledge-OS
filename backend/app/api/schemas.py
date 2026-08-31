@@ -57,7 +57,42 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[ChatSource]
     conversation_id: int
-    # Which agent tool handled this message (e.g. "SEARCH_KNOWLEDGE",
-    # "STUDY_ASSISTANT"). Purely informational — the frontend doesn't need
-    # to know about it, but it's handy for the dev console / a demo.
     tool_used: Optional[str] = None
+
+
+
+
+class StudyRequest(BaseModel):
+    query: str
+    count: Optional[int] = None
+
+
+class StudySource(BaseModel):
+    document: str
+    page: Optional[int] = None
+
+
+class QuizQuestion(BaseModel):
+    question: str
+    options: List[str]
+    correct_answer: int
+    explanation: str
+
+
+class QuizResponse(BaseModel):
+    topic: str
+    questions: List[QuizQuestion]
+    sources: List[StudySource]
+    count: int
+
+
+class Flashcard(BaseModel):
+    front: str
+    back: str
+
+
+class FlashcardsResponse(BaseModel):
+    topic: str
+    cards: List[Flashcard]
+    sources: List[StudySource]
+    count: int

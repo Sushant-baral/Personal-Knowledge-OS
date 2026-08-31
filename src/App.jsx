@@ -17,13 +17,13 @@ import {
   Check,
 } from "lucide-react";
 import "./App.css";
-import { getHealth, sendChatMessage, uploadDocument, listDocuments, deleteDocument } from "./lib/api";
+import { getHealth, sendChatMessage, uploadDocument, listDocuments, deleteDocument, generateQuiz, generateFlashcards } from "./lib/api";
 
 /* ------------------------------------------------------------------ */
 /* Mock data                                                           */
 /* ------------------------------------------------------------------ */
 
-const STATS = { memories: 1284, documents: 47, topics: 62, streak: 14 };
+const STATS = { memories: 0, documents: 11, topics: 11, streak: 1 };
 
 const TOPIC_FILTERS = [
   "All",
@@ -810,7 +810,7 @@ function ChatView() {
   );
 }
 
-function StudyTopicCard({ topic }) {
+function StudyTopicCard({ topic, onQuiz, onFlashcards }) {
   return (
     <div className="pkos-card" style={{ padding: "18px 20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -839,11 +839,331 @@ function StudyTopicCard({ topic }) {
           </div>
         </div>
       </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+        <div className="pkos-btn-ghost" style={{ cursor: "pointer", fontSize: 10 }} onClick={() => onQuiz(topic.name)}>
+          QUIZ ME
+        </div>
+        <div className="pkos-btn-ghost" style={{ cursor: "pointer", fontSize: 10 }} onClick={() => onFlashcards(topic.name)}>
+          FLASHCARDS
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* --- Study: quiz-taking flow ------------------------------------------ */
+
+function QuizSetupBar({ topic, setTopic, count, setCount, onStartQuiz, onStartFlashcards, busy }) {
+  return (
+    <div className="pkos-card" style={{ padding: "16px 20px", display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+        <div className="pkos-mono" style={{ fontSize: 9.5, color: "var(--text-faint)", marginBottom: 4 }}>TOPIC (OPTIONAL)</div>
+        <input
+          className="pkos-input"
+          placeholder="e.g. Operating Systems, Unit 1…"
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          style={{ width: "100%", padding: "6px 0", fontSize: 13.5 }}
+        />
+      </div>
+      <div>
+        <div className="pkos-mono" style={{ fontSize: 9.5, color: "var(--text-faint)", marginBottom: 4 }}>QUESTIONS</div>
+        <select
+          value={count}
+          onChange={(e) => setCount(Number(e.target.value))}
+          className="pkos-mono"
+          style={{ background: "var(--bg-panel)", color: "var(--text)", border: "1px solid var(--border-soft)", padding: "7px 10px", fontSize: 12 }}
+        >
+          {[5, 10, 15, 20].map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <div
+          className="pkos-btn"
+          style={{ cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
+          onClick={() => !busy && onStartQuiz(topic, count)}
+        >
+          START QUIZ
+        </div>
+        <div
+          className="pkos-btn-ghost"
+          style={{ cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
+          onClick={() => !busy && onStartFlashcards(topic, count)}
+        >
+          FLASHCARDS
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuizQuestionView({ questions, index, answers, onAnswer, onNext, onExit }) {
+  const total = questions.length;
+  const q = questions[index];
+  const answered = answers[index];
+  const isLast = index === total - 1;
+
+  return (
+    <div className="pkos-fade-in" style={{ maxWidth: 640 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span className="pkos-mono" style={{ fontSize: 11, color: "var(--text-faint)" }}>
+          QUESTION {String(index + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
+        </span>
+        <span className="pkos-mono" style={{ fontSize: 10.5, color: "var(--text-faint)", cursor: "pointer" }} onClick={onExit}>
+          EXIT
+        </span>
+      </div>
+
+      <div style={{ fontSize: 19, color: "var(--text)", marginTop: 14, lineHeight: 1.5 }}>{q.question}</div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 22 }}>
+        {q.options.map((opt, i) => {
+          const isCorrect = i === q.correct_answer;
+          const isSelected = answered && answered.selected === i;
+          let cls = "pkos-quiz-option";
+          if (answered) {
+            cls += " answered";
+            if (isCorrect) cls += " correct";
+            else if (isSelected) cls += " incorrect";
+          } else if (isSelected) {
+            cls += " selected";
+          }
+          return (
+            <div key={i} className={cls} onClick={() => !answered && onAnswer(i)}>
+              <span className="pkos-quiz-option-letter">{String.fromCharCode(65 + i)}</span>
+              <span>{opt}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {answered && (
+        <div className="pkos-fade-in" style={{ marginTop: 16, borderTop: "1px solid var(--border-soft)", paddingTop: 14 }}>
+          <div className="pkos-mono" style={{ fontSize: 10, color: answered.correct ? "var(--accent)" : "#d97a6c" }}>
+            {answered.correct ? "CORRECT" : "INCORRECT"}
+          </div>
+          {q.explanation && (
+            <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6, marginTop: 8 }}>{q.explanation}</p>
+          )}
+          <div className="pkos-btn" style={{ cursor: "pointer", marginTop: 16, display: "inline-block" }} onClick={onNext}>
+            {isLast ? "FINISH" : "NEXT →"}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuizCompleteView({ questions, answers, sources, onRestart, onExit }) {
+  const total = questions.length;
+  const correctCount = answers.filter((a) => a && a.correct).length;
+  const pct = total ? Math.round((correctCount / total) * 100) : 0;
+  const incorrect = questions
+    .map((q, i) => ({ q, a: answers[i], i }))
+    .filter(({ a }) => a && !a.correct);
+
+  return (
+    <div className="pkos-fade-in" style={{ maxWidth: 640 }}>
+      <Eyebrow>Quiz complete</Eyebrow>
+      <h2 className="pkos-display" style={{ fontSize: 30, marginTop: 6 }}>
+        {correctCount} / {total}
+      </h2>
+      <div className="pkos-mono" style={{ fontSize: 13, color: "var(--accent)", marginTop: 4 }}>{pct}%</div>
+
+      {incorrect.length > 0 && (
+        <div style={{ marginTop: 26 }}>
+          <Eyebrow>Review</Eyebrow>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 16 }}>
+            {incorrect.map(({ q, a, i }) => (
+              <div key={i} className="pkos-card" style={{ padding: "14px 16px" }}>
+                <div style={{ fontSize: 13.5, color: "var(--text)" }}>{q.question}</div>
+                <div style={{ fontSize: 12, color: "#d97a6c", marginTop: 8 }}>
+                  Your answer: {q.options[a.selected]}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--accent)", marginTop: 4 }}>
+                  Correct: {q.options[q.correct_answer]}
+                </div>
+                {q.explanation && (
+                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 6, lineHeight: 1.55 }}>{q.explanation}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {sources && sources.length > 0 && (
+        <div style={{ marginTop: 22 }}>
+          <Eyebrow>Sources</Eyebrow>
+          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+            {sources.map((s, j) => (
+              <div key={j} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-dim)" }}>
+                <FileText size={11} color="var(--text-faint)" />
+                {s.document}{s.page ? ` · p.${s.page}` : ""}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 26 }}>
+        <div className="pkos-btn" style={{ cursor: "pointer" }} onClick={onRestart}>RETAKE</div>
+        <div className="pkos-btn-ghost" style={{ cursor: "pointer" }} onClick={onExit}>BACK TO STUDY</div>
+      </div>
+    </div>
+  );
+}
+
+/* --- Study: flashcard flow --------------------------------------------- */
+
+function FlashcardView({ cards, index, flipped, onFlip, onPrev, onNext, onExit }) {
+  const total = cards.length;
+  const card = cards[index];
+
+  return (
+    <div className="pkos-fade-in" style={{ maxWidth: 560 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span className="pkos-mono" style={{ fontSize: 11, color: "var(--text-faint)" }}>
+          FLASHCARD {String(index + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
+        </span>
+        <span className="pkos-mono" style={{ fontSize: 10.5, color: "var(--text-faint)", cursor: "pointer" }} onClick={onExit}>
+          EXIT
+        </span>
+      </div>
+
+      <div className="pkos-flashcard" style={{ marginTop: 16 }} onClick={onFlip}>
+        <div>
+          <div className="pkos-mono" style={{ fontSize: 9.5, color: "var(--text-faint)", marginBottom: 12 }}>
+            {flipped ? "BACK" : "FRONT — TAP TO REVEAL"}
+          </div>
+          <div style={{ fontSize: 17, color: "var(--text)", lineHeight: 1.6 }}>
+            {flipped ? card.back : card.front}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 18 }}>
+        <div
+          className="pkos-btn-ghost"
+          style={{ cursor: index === 0 ? "default" : "pointer", opacity: index === 0 ? 0.4 : 1 }}
+          onClick={() => index > 0 && onPrev()}
+        >
+          ← PREVIOUS
+        </div>
+        <div
+          className="pkos-btn-ghost"
+          style={{ cursor: index === total - 1 ? "default" : "pointer", opacity: index === total - 1 ? 0.4 : 1 }}
+          onClick={() => index < total - 1 && onNext()}
+        >
+          NEXT →
+        </div>
+      </div>
     </div>
   );
 }
 
 function StudyView() {
+  // "overview" | "loading" | "quiz" | "quiz-complete" | "flashcards" | "error"
+  const [mode, setMode] = useState("overview");
+  const [error, setError] = useState(null);
+
+  const [topic, setTopic] = useState("");
+  const [count, setCount] = useState(10);
+
+  const [quiz, setQuiz] = useState(null); // {topic, questions, sources, count}
+  const [quizIndex, setQuizIndex] = useState(0);
+  const [quizAnswers, setQuizAnswers] = useState([]); // [{selected, correct} | undefined]
+
+  const [deck, setDeck] = useState(null); // {topic, cards, sources, count}
+  const [flashIndex, setFlashIndex] = useState(0);
+  const [flashFlipped, setFlashFlipped] = useState(false);
+
+  // Real (session-only) study stats, separate from the mock per-topic
+  // progress cards below. There's no persistence layer for study
+  // history yet, so this tracks the current session — a clean spot to
+  // wire up real persistence later without touching the rest of the UI.
+  const [sessionStats, setSessionStats] = useState({ quizzesCompleted: 0, questionsAnswered: 0, correctAnswers: 0 });
+
+  const startQuiz = async (topicText, questionCount) => {
+    const q = (topicText || "").trim();
+    if (!q) {
+      setError("Enter a topic — a document title, unit, or concept — to generate a quiz from your documents.");
+      setMode("error");
+      return;
+    }
+    setMode("loading");
+    setError(null);
+    try {
+      // Real round trip: React -> POST /api/study/quiz -> FastAPI (RAG
+      // retrieval + Groq JSON generation) -> structured quiz -> React.
+      const result = await generateQuiz(q, questionCount);
+      setQuiz(result);
+      setQuizIndex(0);
+      setQuizAnswers(new Array(result.questions.length).fill(undefined));
+      setMode("quiz");
+    } catch (err) {
+      setError(err.message || "Could not generate a quiz right now.");
+      setMode("error");
+    }
+  };
+
+  const startFlashcards = async (topicText, cardCount) => {
+    const q = (topicText || "").trim();
+    if (!q) {
+      setError("Enter a topic — a document title, unit, or concept — to generate flashcards from your documents.");
+      setMode("error");
+      return;
+    }
+    setMode("loading");
+    setError(null);
+    try {
+      const result = await generateFlashcards(q, cardCount);
+      setDeck(result);
+      setFlashIndex(0);
+      setFlashFlipped(false);
+      setMode("flashcards");
+    } catch (err) {
+      setError(err.message || "Could not generate flashcards right now.");
+      setMode("error");
+    }
+  };
+
+  const answerQuestion = (optionIndex) => {
+    const q = quiz.questions[quizIndex];
+    const correct = optionIndex === q.correct_answer;
+    setQuizAnswers((prev) => {
+      const next = [...prev];
+      next[quizIndex] = { selected: optionIndex, correct };
+      return next;
+    });
+    setSessionStats((s) => ({
+      ...s,
+      questionsAnswered: s.questionsAnswered + 1,
+      correctAnswers: s.correctAnswers + (correct ? 1 : 0),
+    }));
+  };
+
+  const nextQuestion = () => {
+    if (quizIndex < quiz.questions.length - 1) {
+      setQuizIndex((i) => i + 1);
+    } else {
+      setSessionStats((s) => ({ ...s, quizzesCompleted: s.quizzesCompleted + 1 }));
+      setMode("quiz-complete");
+    }
+  };
+
+  const backToOverview = () => {
+    setMode("overview");
+    setError(null);
+  };
+
+  const accuracy = sessionStats.questionsAnswered
+    ? Math.round((sessionStats.correctAnswers / sessionStats.questionsAnswered) * 100)
+    : null;
+
   return (
     <div className="pkos-fade-in pkos-scrim pkos-view" style={{ overflowY: "auto", height: "100%" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
@@ -851,14 +1171,100 @@ function StudyView() {
           <Eyebrow>Progress</Eyebrow>
           <h2 className="pkos-display" style={{ fontSize: 30, marginTop: 6 }}>Study</h2>
         </div>
-        <div className="pkos-btn" style={{ cursor: "pointer" }}>START QUIZ</div>
+        {mode !== "overview" && (
+          <div className="pkos-btn-ghost" style={{ cursor: "pointer" }} onClick={backToOverview}>
+            ← BACK TO TOPICS
+          </div>
+        )}
       </div>
 
-      <div className="pkos-study-grid">
-        {STUDY_TOPICS.map((t) => (
-          <StudyTopicCard key={t.name} topic={t} />
-        ))}
-      </div>
+      {mode === "overview" && (
+        <>
+          <div style={{ display: "flex", gap: 40, marginTop: 22, flexWrap: "wrap" }}>
+            <StatBlock value={sessionStats.quizzesCompleted} label="Quizzes this session" />
+            <StatBlock value={sessionStats.questionsAnswered} label="Questions answered" />
+            <StatBlock value={accuracy != null ? `${accuracy}%` : "—"} label="Accuracy" />
+          </div>
+
+          <div style={{ marginTop: 22 }}>
+            <QuizSetupBar
+              topic={topic}
+              setTopic={setTopic}
+              count={count}
+              setCount={setCount}
+              onStartQuiz={startQuiz}
+              onStartFlashcards={startFlashcards}
+              busy={false}
+            />
+          </div>
+
+          <div className="pkos-study-grid">
+            {STUDY_TOPICS.map((t) => (
+              <StudyTopicCard key={t.name} topic={t} onQuiz={(name) => startQuiz(name, count)} onFlashcards={(name) => startFlashcards(name, count)} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {mode === "loading" && (
+        <div className="pkos-mono" style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 40 }}>
+          <span className="pkos-cursor">›</span> generating from your documents…
+        </div>
+      )}
+
+      {mode === "error" && (
+        <div style={{ marginTop: 40 }}>
+          <div className="pkos-mono" style={{ fontSize: 11, color: "#d97a6c" }}>{error}</div>
+          <div className="pkos-btn-ghost" style={{ cursor: "pointer", marginTop: 16, display: "inline-block" }} onClick={backToOverview}>
+            BACK TO TOPICS
+          </div>
+        </div>
+      )}
+
+      {mode === "quiz" && quiz && (
+        <div style={{ marginTop: 30 }}>
+          <QuizQuestionView
+            questions={quiz.questions}
+            index={quizIndex}
+            answers={quizAnswers}
+            onAnswer={answerQuestion}
+            onNext={nextQuestion}
+            onExit={backToOverview}
+          />
+        </div>
+      )}
+
+      {mode === "quiz-complete" && quiz && (
+        <div style={{ marginTop: 30 }}>
+          <QuizCompleteView
+            questions={quiz.questions}
+            answers={quizAnswers}
+            sources={quiz.sources}
+            onRestart={() => startQuiz(quiz.topic, quiz.questions.length)}
+            onExit={backToOverview}
+          />
+        </div>
+      )}
+
+      {mode === "flashcards" && deck && (
+        <div style={{ marginTop: 30 }}>
+          <FlashcardView
+            cards={deck.cards}
+            index={flashIndex}
+            flipped={flashFlipped}
+            onFlip={() => setFlashFlipped((f) => !f)}
+            onPrev={() => {
+              setFlashIndex((i) => i - 1);
+              setFlashFlipped(false);
+            }}
+            onNext={() => {
+              setFlashIndex((i) => i + 1);
+              setFlashFlipped(false);
+            }}
+            onExit={backToOverview}
+          />
+        </div>
+      )}
     </div>
   );
 }

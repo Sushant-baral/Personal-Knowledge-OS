@@ -32,7 +32,6 @@ from typing import Literal, Optional
 
 ToolName = Literal["GENERAL_CHAT", "GET_DOCUMENT", "STUDY_ASSISTANT", "SEARCH_KNOWLEDGE"]
 
-# Study-assistant sub-modes, used to pick a prompt template in prompts.py.
 StudyMode = Literal["summary", "quiz", "flashcards", "explain"]
 
 
@@ -64,9 +63,33 @@ _GET_DOCUMENT_PATTERN = re.compile(
 _QUOTED_NAME_PATTERN = re.compile(r"[\"“']([^\"”']{2,80})[\"”']")
 
 _SUMMARY_PATTERN = re.compile(r"\bsummar(y|ize|ise|ies)\b", re.I)
-_QUIZ_PATTERN = re.compile(
-    r"\bquiz\b|\b(?:make|give|create)\s+(?:me\s+)?\d*\s*questions\b|\btest me\b", re.I
+
+_QUIZ_STANDALONE_PATTERN = re.compile(
+    r"\bquiz(?:zes)?\b"  
+
+    r"|\bmcqs?\b"  
+
+    r"|\bmultiple[\s-]choice\b"  
+
+    r"|\btest(?:ing)?\s+(?:me\b|my\s+(?:knowledge|understanding)\b)"  
+
+    r"|\bpractice\s+questions\b"  
+
+    r"|\bquestion\s+bank\b",
+    re.I,
 )
+_QUESTION_WORD_PATTERN = re.compile(r"\b(?:questions?|qns?)\b", re.I)
+_QUIZ_INTENT_VERB_PATTERN = re.compile(
+    r"\b(?:ask|make|give|create|generate|write|prepare|test|quiz)\b", re.I
+)
+
+
+def _looks_like_quiz_request(text: str) -> bool:
+    if _QUIZ_STANDALONE_PATTERN.search(text):
+        return True
+    return bool(_QUESTION_WORD_PATTERN.search(text) and _QUIZ_INTENT_VERB_PATTERN.search(text))
+
+
 _FLASHCARD_PATTERN = re.compile(r"\bflash\s?cards?\b", re.I)
 _EXPLAIN_PATTERN = re.compile(
     r"\bexplain\b|\blike i'?m a beginner\b|\bin simple terms\b|\bteach me\b|\bin layman'?s? terms\b",
@@ -88,11 +111,9 @@ def decide_action(message: str, known_document_titles: Optional[list] = None) ->
 
     word_count = len(text.split())
 
-    # 1. Greetings / small talk — short, no question content.
     if _GREETING_PATTERN.search(text) and word_count <= 6:
         return AgentDecision(tool="GENERAL_CHAT", reason="Matched greeting/small-talk pattern.")
 
-    # 2. Questions about the document collection itself.
     if _GET_DOCUMENT_PATTERN.search(text):
         document_hint = _extract_document_hint(text, known_document_titles)
         return AgentDecision(
@@ -101,11 +122,7 @@ def decide_action(message: str, known_document_titles: Optional[list] = None) ->
             document_hint=document_hint,
         )
 
-    # 3. Study-oriented requests (summary / quiz / flashcards / explain).
-    #    Checked in a fixed order since a message could loosely match more
-    #    than one (e.g. "explain and quiz me" — quiz wins because it's a
-    #    more specific, structured output).
-    if _QUIZ_PATTERN.search(text):
+    if _looks_like_quiz_request(text):
         return AgentDecision(tool="STUDY_ASSISTANT", reason="Quiz/question-generation request.", study_mode="quiz")
     if _FLASHCARD_PATTERN.search(text):
         return AgentDecision(tool="STUDY_ASSISTANT", reason="Flashcard request.", study_mode="flashcards")
@@ -114,7 +131,6 @@ def decide_action(message: str, known_document_titles: Optional[list] = None) ->
     if _EXPLAIN_PATTERN.search(text):
         return AgentDecision(tool="STUDY_ASSISTANT", reason="Explanation request.", study_mode="explain")
 
-    # 4. Default: treat it as a knowledge-base question.
     return AgentDecision(tool="SEARCH_KNOWLEDGE", reason="Default: treated as a factual knowledge-base question.")
 
 

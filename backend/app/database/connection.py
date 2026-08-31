@@ -17,9 +17,6 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./pkos.db")
 
-# SQLite needs this because FastAPI can use a session across threads
-# (it doesn't for a single request, but the default test client / some
-# ASGI setups do). Any other database ignores this.
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args, future=True)
@@ -36,7 +33,6 @@ def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 
-# All ORM models inherit from this Base.
 Base = declarative_base()
 
 
@@ -51,7 +47,8 @@ def get_db():
 
 def init_db() -> None:
     """Create any tables that don't exist yet. Safe to call on every startup."""
-    from app.database import models  # noqa: F401  (registers models on Base)
+    from app.database import models  
+
 
     Base.metadata.create_all(bind=engine)
     _migrate_documents_table()
@@ -72,9 +69,6 @@ def _migrate_documents_table() -> None:
     with engine.connect() as conn:
         existing_columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(documents)")}
 
-        # Rows that already exist were indexed under the old (pre-status)
-        # synchronous logic, which never left a row behind unless indexing
-        # had already succeeded — so "indexed" is the correct backfill value.
         statements = []
         if "status" not in existing_columns:
             statements.append("ALTER TABLE documents ADD COLUMN status VARCHAR NOT NULL DEFAULT 'indexed'")

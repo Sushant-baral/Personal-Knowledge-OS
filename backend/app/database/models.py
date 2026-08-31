@@ -44,12 +44,7 @@ class Document(Base):
     title = Column(String, nullable=True)
     file_type = Column(String, nullable=False)
     content = Column(Text, nullable=False)
-    # "processing" while chunking/embedding is running, "indexed" once
-    # vectors are actually in the store, "failed" if that step errored.
     status = Column(String, nullable=False, default="processing")
-    # Absolute path to the original uploaded file on local disk (see
-    # app/api/routes/documents.py:STORAGE_DIR). Nullable so pre-existing
-    # rows from before this column existed don't break.
     file_path = Column(String, nullable=True)
     size_bytes = Column(Integer, nullable=True)
     error_message = Column(Text, nullable=True)
@@ -98,7 +93,8 @@ class Message(Base):
     conversation_id = Column(
         Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    role = Column(String, nullable=False)  # "user" or "assistant"
+    role = Column(String, nullable=False)  
+
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

@@ -100,3 +100,19 @@ export function sendChatMessage(message, conversationId) {
     body: JSON.stringify({ message, conversation_id: conversationId ?? null }),
   });
 }
+
+/** POST /api/study/quiz {query, count?} -> {topic, questions, sources, count} */
+export function generateQuiz(query, count) {
+  return request("/api/study/quiz", {
+    method: "POST",
+    body: JSON.stringify({ query, count: count ?? null }),
+  });
+}
+
+/** POST /api/study/flashcards {query, count?} -> {topic, cards, sources, count} */
+export function generateFlashcards(query, count) {
+  return request("/api/study/flashcards", {
+    method: "POST",
+    body: JSON.stringify({ query, count: count ?? null }),
+  });
+}
