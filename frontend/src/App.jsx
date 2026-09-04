@@ -19,6 +19,100 @@ import {
 import "./App.css";
 import { getHealth, sendChatMessage, uploadDocument, listDocuments, deleteDocument, generateQuiz, generateFlashcards, getSettings, updateSettings, deleteSettings } from "./lib/api";
 
+function renderInline(text, keyPrefix) {
+  const parts = text.split(/(\*\*.+?\*\*|`.+?`|\*.+?\*)/g);
+  return parts.map((part, i) => {
+    const key = `${keyPrefix}-${i}`;
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={key}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code key={key} style={{ background: "var(--border-soft)", padding: "1px 5px", borderRadius: 4, fontSize: "0.9em" }}>
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    if (part.startsWith("*") && part.endsWith("*") && !part.startsWith("**")) {
+      return <em key={key}>{part.slice(1, -1)}</em>;
+    }
+    return part;
+  });
+}
+
+function Markdown({ text }) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  const blocks = [];
+  let listBuffer = [];
+  let listType = null;
+
+  const flushList = (key) => {
+    if (listBuffer.length === 0) return;
+    const Tag = listType === "ol" ? "ol" : "ul";
+    blocks.push(
+      <Tag key={`list-${key}`} style={{ margin: "6px 0 10px 20px", padding: 0 }}>
+        {listBuffer.map((item, i) => (
+          <li key={i} style={{ marginBottom: 4 }}>{renderInline(item, `li-${key}-${i}`)}</li>
+        ))}
+      </Tag>
+    );
+    listBuffer = [];
+    listType = null;
+  };
+
+  lines.forEach((rawLine, idx) => {
+    const line = rawLine.trim();
+
+    if (!line) {
+      flushList(idx);
+      return;
+    }
+
+    const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
+    if (headerMatch) {
+      flushList(idx);
+      const level = headerMatch[1].length;
+      const sizes = { 1: 20, 2: 18, 3: 16, 4: 15, 5: 14, 6: 13 };
+      blocks.push(
+        <div
+          key={`h-${idx}`}
+          style={{ fontWeight: 700, fontSize: sizes[level] || 14, margin: "14px 0 6px" }}
+        >
+          {renderInline(headerMatch[2], `h-${idx}`)}
+        </div>
+      );
+      return;
+    }
+
+    const bulletMatch = line.match(/^[-*]\s+(.*)$/);
+    if (bulletMatch) {
+      if (listType !== "ul") flushList(idx);
+      listType = "ul";
+      listBuffer.push(bulletMatch[1]);
+      return;
+    }
+
+    const numberedMatch = line.match(/^\d+\.\s+(.*)$/);
+    if (numberedMatch) {
+      if (listType !== "ol") flushList(idx);
+      listType = "ol";
+      listBuffer.push(numberedMatch[1]);
+      return;
+    }
+
+    flushList(idx);
+    blocks.push(
+      <p key={`p-${idx}`} style={{ margin: "0 0 10px" }}>
+        {renderInline(line, `p-${idx}`)}
+      </p>
+    );
+  });
+
+  flushList("end");
+  return <>{blocks}</>;
+}
+
 /* ------------------------------------------------------------------ */
 /* Mock data                                                           */
 /* ------------------------------------------------------------------ */
@@ -757,7 +851,7 @@ function ChatView() {
                 {m.role === "user" ? "> YOU" : "> ASSISTANT"}
               </div>
               <div style={{ fontSize: 14, lineHeight: 1.65, color: m.role === "user" ? "var(--text)" : "var(--text-dim)" }}>
-                {m.text}
+                {m.role === "assistant" ? <Markdown text={m.text} /> : m.text}
               </div>
               {m.sources && m.sources.length > 0 && (
                 <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 10 }}>
