@@ -86,6 +86,27 @@ class Conversation(Base):
         return f"<Conversation id={self.id} user_id={self.user_id}>"
 
 
+class AppSettings(Base):
+    """
+    Single-row table (id is always 1) holding the LLM provider/key/model
+    entered through the in-app settings screen. Lets the app run without
+    a backend/.env file — see app/llm/settings_store.py and
+    app/llm/provider.py for how this is read and how it falls back to
+    environment variables when no row exists yet.
+    """
+
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True)
+    llm_provider = Column(String, nullable=True)
+    llm_api_key = Column(String, nullable=True)
+    llm_model = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<AppSettings provider={self.llm_provider!r} model={self.llm_model!r}>"
+
+
 class Message(Base):
     __tablename__ = "messages"
 

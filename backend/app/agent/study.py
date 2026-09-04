@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.agent import prompts, tools
 from app.llm.provider import generate_chat
+from app.llm.settings_store import get_llm_settings
 
 logger = logging.getLogger("app.agent.study")
 
@@ -49,6 +50,7 @@ def generate_quiz(db: Session, query: str, count: Optional[int] = None) -> dict:
     context = prompts.format_context(rag_results)
     system_prompt = prompts.quiz_json_system_prompt(count, context)
     questions = _generate_with_retry(
+        db=db,
         system_prompt=system_prompt,
         user_note=f"Generate the quiz now for: {query}",
         parser=_parse_quiz_json,
@@ -66,6 +68,7 @@ def generate_flashcards(db: Session, query: str, count: Optional[int] = None) ->
     context = prompts.format_context(rag_results)
     system_prompt = prompts.flashcard_json_system_prompt(count, context)
     cards = _generate_with_retry(
+        db=db,
         system_prompt=system_prompt,
         user_note=f"Generate the flashcards now for: {query}",
         parser=_parse_flashcards_json,
@@ -116,13 +119,20 @@ def _retrieve_or_raise(query: str, count: int):
     return rag_results, source_list
 
 
-def _generate_with_retry(system_prompt: str, user_note: str, parser, expected_min: int) -> list:
+def _generate_with_retry(db: Session, system_prompt: str, user_note: str, parser, expected_min: int) -> list:
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_note},
     ]
 
-    raw = generate_chat(messages)
+    saved_settings = get_llm_settings(db) or {}
+    llm_kwargs = {
+        "provider": saved_settings.get("provider"),
+        "api_key": saved_settings.get("api_key"),
+        "model": saved_settings.get("model"),
+    }
+
+    raw = generate_chat(messages, **llm_kwargs)
     parsed = parser(raw)
     if parsed and len(parsed) >= expected_min:
         return parsed
@@ -139,7 +149,7 @@ def _generate_with_retry(system_prompt: str, user_note: str, parser, expected_mi
             ),
         }
     )
-    raw_retry = generate_chat(messages)
+    raw_retry = generate_chat(messages, **llm_kwargs)
     parsed_retry = parser(raw_retry)
     if parsed_retry and len(parsed_retry) >= expected_min:
         return parsed_retry

@@ -116,3 +116,21 @@ export function generateFlashcards(query, count) {
     body: JSON.stringify({ query, count: count ?? null }),
   });
 }
+
+/** GET /api/settings -> {is_configured, source, provider?, model?, api_key_hint?} */
+export function getSettings() {
+  return request("/api/settings");
+}
+
+/** PUT /api/settings {provider, api_key, model?} -> SettingsResponse */
+export function updateSettings(provider, apiKey, model) {
+  return request("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({ provider, api_key: apiKey, model: model || null }),
+  });
+}
+
+/** DELETE /api/settings -> {ok: true} */
+export function deleteSettings() {
+  return request("/api/settings", { method: "DELETE" });
+}

@@ -54,6 +54,7 @@ from app.agent.planner import decide_action
 from app.database.models import Conversation, Document, Message
 from app.database.seed import get_or_create_default_user
 from app.llm.provider import generate_chat
+from app.llm.settings_store import get_llm_settings
 from app.memory.extraction import maybe_extract_memory
 from app.memory.store import retrieve_memories, store_memory
 
@@ -182,7 +183,13 @@ def handle_chat(db: Session, message: str, conversation_id: Optional[int] = None
 
     llm_messages = [{"role": "system", "content": system_prompt}, *history, {"role": "user", "content": message}]
 
-    answer = generate_chat(llm_messages)
+    saved_settings = get_llm_settings(db) or {}
+    answer = generate_chat(
+        llm_messages,
+        provider=saved_settings.get("provider"),
+        api_key=saved_settings.get("api_key"),
+        model=saved_settings.get("model"),
+    )
     logger.info("response generated tool=%s answer_length=%d", decision.tool, len(answer))
 
     db.add(Message(conversation_id=conversation.id, role="assistant", content=answer))

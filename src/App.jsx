@@ -17,7 +17,7 @@ import {
   Check,
 } from "lucide-react";
 import "./App.css";
-import { getHealth, sendChatMessage, uploadDocument, listDocuments, deleteDocument, generateQuiz, generateFlashcards } from "./lib/api";
+import { getHealth, sendChatMessage, uploadDocument, listDocuments, deleteDocument, generateQuiz, generateFlashcards, getSettings, updateSettings, deleteSettings } from "./lib/api";
 
 /* ------------------------------------------------------------------ */
 /* Mock data                                                           */
@@ -1278,11 +1278,186 @@ function SettingsRow({ label, value }) {
   );
 }
 
+const PROVIDER_MODEL_PLACEHOLDER = {
+  groq: "llama-3.3-70b-versatile (leave blank for default)",
+  openai: "gpt-4o-mini (leave blank for default)",
+};
+
+/**
+ * Lets the user configure the LLM provider/API key/model from inside the
+ * app instead of needing a backend/.env file — talks to the backend's
+ * GET/PUT/DELETE /api/settings (see app/api/routes/settings.py). The
+ * saved key is never sent back by the backend; only a masked hint like
+ * "••••1234" is shown once something's been saved.
+ */
+function AiProviderSettings() {
+  const [loading, setLoading] = useState(true);
+  const [current, setCurrent] = useState(null); // last known SettingsResponse from the backend
+  const [loadError, setLoadError] = useState(null);
+
+  const [provider, setProvider] = useState("groq");
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState("");
+
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  const [clearing, setClearing] = useState(false);
+
+  const refresh = () => {
+    setLoading(true);
+    setLoadError(null);
+    getSettings()
+      .then((data) => {
+        setCurrent(data);
+        if (data.provider) setProvider(data.provider);
+        setModel(data.model || "");
+      })
+      .catch((err) => setLoadError(err.message))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(refresh, []);
+
+  const handleSave = () => {
+    if (!apiKey.trim()) {
+      setSaveError("Enter an API key before saving.");
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    updateSettings(provider, apiKey.trim(), model.trim())
+      .then((data) => {
+        setCurrent(data);
+        setApiKey("");
+        setSavedFlash(true);
+        setTimeout(() => setSavedFlash(false), 2500);
+      })
+      .catch((err) => setSaveError(err.message))
+      .finally(() => setSaving(false));
+  };
+
+  const handleClear = () => {
+    setClearing(true);
+    deleteSettings()
+      .then(refresh)
+      .catch((err) => setSaveError(err.message))
+      .finally(() => setClearing(false));
+  };
+
+  return (
+    <div className="pkos-card" style={{ padding: "18px 20px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <div className="pkos-mono" style={{ fontSize: 10, color: "var(--text-faint)" }}>AI PROVIDER</div>
+        {!loading && current && (
+          <div className="pkos-mono" style={{ fontSize: 10.5, color: current.is_configured ? "var(--accent)" : "#d97a6c" }}>
+            ● {current.is_configured
+              ? `CONNECTED · ${current.provider?.toUpperCase()} · ${current.source === "database" ? "SAVED HERE" : "FROM .env"} · ${current.api_key_hint}`
+              : "NOT CONFIGURED"}
+          </div>
+        )}
+      </div>
+
+      {loading && (
+        <div className="pkos-mono" style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 12 }}>
+          <span className="pkos-cursor">›</span> checking current configuration…
+        </div>
+      )}
+
+      {loadError && (
+        <div className="pkos-mono" style={{ fontSize: 11, color: "#d97a6c", marginTop: 12 }}>{loadError}</div>
+      )}
+
+      {!loading && !loadError && (
+        <>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 18 }}>
+            <div style={{ minWidth: 140 }}>
+              <div className="pkos-mono" style={{ fontSize: 9.5, color: "var(--text-faint)", marginBottom: 4 }}>PROVIDER</div>
+              <select
+                value={provider}
+                onChange={(e) => setProvider(e.target.value)}
+                className="pkos-mono"
+                style={{ background: "var(--bg-panel)", color: "var(--text)", border: "1px solid var(--border-soft)", padding: "7px 10px", fontSize: 12, width: "100%" }}
+              >
+                <option value="groq">Groq</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </div>
+
+            <div style={{ flex: "1 1 220px", minWidth: 200 }}>
+              <div className="pkos-mono" style={{ fontSize: 9.5, color: "var(--text-faint)", marginBottom: 4 }}>API KEY</div>
+              <input
+                className="pkos-input"
+                type="password"
+                autoComplete="off"
+                placeholder={current?.is_configured ? "Enter a new key to replace the saved one" : "Paste your API key…"}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                style={{ width: "100%", padding: "6px 0", fontSize: 13.5 }}
+              />
+            </div>
+
+            <div style={{ flex: "1 1 220px", minWidth: 200 }}>
+              <div className="pkos-mono" style={{ fontSize: 9.5, color: "var(--text-faint)", marginBottom: 4 }}>MODEL (OPTIONAL)</div>
+              <input
+                className="pkos-input"
+                placeholder={PROVIDER_MODEL_PLACEHOLDER[provider]}
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                style={{ width: "100%", padding: "6px 0", fontSize: 13.5 }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
+            <div
+              className="pkos-btn"
+              style={{ cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1 }}
+              onClick={() => !saving && handleSave()}
+            >
+              {saving ? "SAVING…" : "SAVE"}
+            </div>
+
+            {current?.source === "database" && (
+              <div
+                className="pkos-btn-ghost"
+                style={{ cursor: clearing ? "default" : "pointer", opacity: clearing ? 0.6 : 1 }}
+                onClick={() => !clearing && handleClear()}
+              >
+                {clearing ? "CLEARING…" : "REMOVE SAVED KEY"}
+              </div>
+            )}
+
+            {savedFlash && (
+              <span className="pkos-mono" style={{ fontSize: 11, color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <Check size={12} /> SAVED
+              </span>
+            )}
+            {saveError && (
+              <span className="pkos-mono" style={{ fontSize: 11, color: "#d97a6c" }}>{saveError}</span>
+            )}
+          </div>
+
+          <div className="pkos-mono" style={{ fontSize: 10.5, color: "var(--text-faint)", marginTop: 14, lineHeight: 1.6 }}>
+            The key is stored on this device's backend database, not in this browser. Anyone running their own
+            copy of the backend needs to save their own key here once — no .env file needed.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SettingsView() {
   return (
     <div className="pkos-fade-in pkos-view" style={{ maxWidth: 520 }}>
       <Eyebrow>Preferences</Eyebrow>
       <h2 className="pkos-display" style={{ fontSize: 30, marginTop: 6 }}>Settings</h2>
+
+      <div style={{ marginTop: 26 }}>
+        <AiProviderSettings />
+      </div>
 
       <div style={{ marginTop: 26 }}>
         <div className="pkos-mono" style={{ fontSize: 10, color: "var(--text-faint)", marginBottom: 4 }}>ACCOUNT</div>

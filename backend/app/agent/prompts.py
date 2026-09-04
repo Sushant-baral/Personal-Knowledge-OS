@@ -1,4 +1,26 @@
+"""
+System prompts for each agent path. Kept in one place so the "voice"
+of the agent (tone, formatting, grounding rules, honesty about missing
+info) is consistent and easy to tweak without touching orchestration
+logic.
 
+Formatting/tone rewrite notes (answer-quality pass):
+- The agent must read like a knowledgeable human tutor, never like a
+  raw LLM narrating its own retrieval pipeline. It must never mention
+  "context", "chunks", "retrieval", "RAG", "vector search", "the
+  model", etc. to the user.
+- Inline "Document · p.N" citations were removed from the grounding
+  rule. Sources are already surfaced to the user through the separate
+  `sources` field/UI (see orchestrator.handle_chat), so repeating them
+  inside the answer text is redundant clutter, not a citation need.
+- Markdown formatting (headings, bold, short paragraphs, bullet/
+  numbered lists) is now spelled out explicitly, since the small/fast
+  models behind Groq don't reliably default to clean structure on
+  their own.
+- Each STUDY_ASSISTANT mode (summary/quiz/flashcards/explain) gets its
+  own concrete template instead of a one-line hint, so the four modes
+  actually look different from each other and from a plain Q&A answer.
+"""
 
 from typing import List
 
@@ -9,9 +31,6 @@ BASE_IDENTITY = (
     "AI system would."
 )
 
-# Tone/formatting rules shared by every response path (not just the
-# retrieval-grounded ones), so GENERAL_CHAT and GET_DOCUMENT read with the
-# same voice as SEARCH_KNOWLEDGE/STUDY_ASSISTANT.
 STYLE_RULES = (
     "Voice and formatting rules, always:\n"
     "- Never mention internal mechanics — words like 'context', 'chunks', "
@@ -37,8 +56,6 @@ STYLE_RULES = (
     "inside your answer — sources are already shown to the user separately."
 )
 
-# Shared rule across every retrieval-grounded path: never invent document
-# content, always be explicit when nothing relevant was found.
 GROUNDING_RULES = (
     "Ground your answer strictly in the material below, which comes from "
     "the user's own uploaded documents. Do not invent facts that aren't "
@@ -187,7 +204,6 @@ def get_document_system_prompt(tool_data: dict) -> str:
             "name, and mention what they do have uploaded instead."
         )
 
-    # match_type == "list"
     docs = tool_data.get("all_documents", [])
     if not docs:
         return (
@@ -202,7 +218,7 @@ def get_document_system_prompt(tool_data: dict) -> str:
     )
 
 
-#
+
 JSON_ONLY_INSTRUCTION = (
     "Respond with ONLY valid JSON matching the schema below — no markdown "
     "code fences, no commentary before or after, no trailing commas."

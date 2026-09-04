@@ -1,10 +1,18 @@
 """
 LLM provider abstraction.
 
-Everything about which provider/model/key to use comes from environment
-variables — nothing is ever hardcoded. Currently implements "openai" and
-"groq"; add another provider by adding a branch in generate_chat() and a
-new _generate_<provider>() function, without changing any caller.
+Which provider/model/key to use can come from two places, checked in
+this order:
+1. Explicit overrides passed in by the caller (provider/api_key/model
+   args below) — these come from the app_settings DB row that the
+   in-app Settings screen writes to (see app/llm/settings_store.py).
+2. Environment variables (LLM_PROVIDER / LLM_API_KEY / LLM_MODEL) from
+   backend/.env, used only when no override is passed in — this keeps
+   the original .env-based setup working for anyone who still wants it.
+
+Currently implements "openai" and "groq"; add another provider by
+adding a branch in generate_chat() and a new _generate_<provider>()
+function, without changing any caller.
 
 generate_chat() is the core entry point: it takes a full list of chat
 messages (system prompt + short-term conversation history + the current
@@ -15,7 +23,7 @@ that just wants a single-prompt call.
 """
 
 import os
-from typing import List, TypedDict
+from typing import List, Optional, TypedDict
 
 
 class ChatMessage(TypedDict):
@@ -34,8 +42,10 @@ class LLMProviderError(Exception):
     to it fails."""
 
 
-def is_llm_configured() -> bool:
-    return bool(os.getenv("LLM_PROVIDER")) and bool(os.getenv("LLM_API_KEY"))
+def is_llm_configured(provider: Optional[str] = None, api_key: Optional[str] = None) -> bool:
+    provider = provider or os.getenv("LLM_PROVIDER")
+    api_key = api_key or os.getenv("LLM_API_KEY")
+    return bool(provider) and bool(api_key)
 
 
 def generate_answer(prompt: str) -> str:
@@ -44,15 +54,21 @@ def generate_answer(prompt: str) -> str:
     return generate_chat([{"role": "user", "content": prompt}])
 
 
-def generate_chat(messages: List[ChatMessage]) -> str:
-    provider = (os.getenv("LLM_PROVIDER") or "").strip().lower()
-    api_key = os.getenv("LLM_API_KEY")
-    model = (os.getenv("LLM_MODEL") or "").strip()
+def generate_chat(
+    messages: List[ChatMessage],
+    provider: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
+    provider = (provider or os.getenv("LLM_PROVIDER") or "").strip().lower()
+    api_key = api_key or os.getenv("LLM_API_KEY")
+    model = (model or os.getenv("LLM_MODEL") or "").strip()
 
     if not provider or not api_key:
         raise LLMNotConfiguredError(
-            "No LLM provider is configured. Set LLM_PROVIDER, LLM_API_KEY, "
-            "and LLM_MODEL in backend/.env to enable chat responses."
+            "No LLM provider is configured. Set it up from the app's "
+            "Settings screen, or set LLM_PROVIDER, LLM_API_KEY, and "
+            "LLM_MODEL in backend/.env, to enable chat responses."
         )
 
     if provider == "openai":
@@ -61,7 +77,7 @@ def generate_chat(messages: List[ChatMessage]) -> str:
     if provider == "groq":
         return _generate_groq(messages, api_key=api_key, model=model or "qwen/qwen3.8-27b")
 
-    raise LLMProviderError(f"Unsupported LLM_PROVIDER '{provider}'.")
+    raise LLMProviderError(f"Unsupported LLM provider '{provider}'.")
 
 
 def _generate_openai(messages: List[ChatMessage], api_key: str, model: str) -> str:

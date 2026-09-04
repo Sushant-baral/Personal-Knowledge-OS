@@ -96,3 +96,17 @@ class FlashcardsResponse(BaseModel):
     cards: List[Flashcard]
     sources: List[StudySource]
     count: int
+
+
+class SettingsUpdateRequest(BaseModel):
+    provider: str
+    api_key: str
+    model: Optional[str] = None
+
+
+class SettingsResponse(BaseModel):
+    is_configured: bool
+    source: str  # "database", "environment", or "none"
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    api_key_hint: Optional[str] = None  # last 4 characters only, never the full key
